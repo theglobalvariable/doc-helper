@@ -12,9 +12,11 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from langchain_tavily import TavilyCrawl, TavilyExtract, TavilyMap
 
+load_dotenv()
+
+from crawler import async_crawl, async_extract
 from logger import *
 
-load_dotenv()
 
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL") or "qwen3-embedding:0.6b"
 CHAT_MODEL = os.getenv("CHAT_MODEL")
@@ -32,50 +34,24 @@ embeddings = OllamaEmbeddings(model=EMBEDDING_MODEL)
 vector_store = PineconeVectorStore(index_name=INDEX_NAME, embedding=embeddings)
 
 # define text splitter
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-
-## define tavily instances
-tavily_extract = TavilyExtract()
-tavily_map = TavilyMap(max_depth=5, max_breadth=5, max_pages=1000)
-tavily_crawl = TavilyCrawl()
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=200)
 
 
 async def main(url):
-    log_header("DOCUMENTATION HELPER - INGESTION")
+    log_header("DOCUMENTATION HELPER - INGESTION PHASE")
 
+    # Crawl or Extract documents from the documentation site
+    all_docs = await async_crawl(url)
+    # all_docs = await async_extract(url)
+
+    # Split documents into chunks
+    log_header("DOCUMENT CHUNKING PHASE")
     log_info(
-        f"🗺️  TavilyCrawl: Starting to crawl documentation from {url}", Colors.PURPLE
+        f"🔪  Text Splitter: Starting to split {len(all_docs)} documents with 4000 chunk size and 200 overlap",
+        Colors.YELLOW,
     )
-
-    crawl_result = tavily_crawl.invoke(
-        {
-            "url": url,
-            "max_depth": 5,
-            "extract_depth": "advanced",
-            "instructions": "Documentation relevant to ai agents, langchain, and langgraph. Focus on extracting code snippets, API references, and best practices. Ignore unrelated content like marketing pages, blogs, or user forums.",
-        }
-    )
-
-    if crawl_result.get("error"):
-        log_error(f"TavilyCrawl: Error crawling {url} - {crawl_result['error']}")
-        return
-
-    log_success(
-        f"TavilyCrawl: Successfully crawled {len(crawl_result["results"])} documents from {url}"
-    )
-
-    all_docs = []
-    for crawl_item in crawl_result["results"]:
-        page_url = crawl_item["url"]
-        content = crawl_item["raw_content"]
-
-        if not content:
-            log_warning(f"TavilyCrawl: No content extracted from {page_url}")
-            continue
-
-        log_info(f"TavilyCrawl: Successfully crawled {page_url}")
-
-        all_docs.append(Document(page_content=content, metadata={"source": page_url}))
+    all_chunks = text_splitter.split_documents(all_docs)
+    log_success(f"Text Splitter: Successfully split into {len(all_chunks)} chunks for {len(all_docs)} documents")
 
 
 if __name__ == "__main__":
