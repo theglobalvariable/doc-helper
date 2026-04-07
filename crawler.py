@@ -4,23 +4,27 @@ from typing import Any, Dict, List
 from langchain_core.documents import Document
 from langchain_tavily import TavilyCrawl, TavilyExtract, TavilyMap
 
+from config import set_ssl_certificates
 from logger import *
+
+set_ssl_certificates()
 
 ## define tavily instances
 tavily_extract = TavilyExtract()
 tavily_map = TavilyMap(max_depth=5, max_breadth=5, max_pages=1000)
 tavily_crawl = TavilyCrawl()
 
-INSTRUCTIONS = "Documentation relevant to ai agents, langchain, and langgraph. Focus on extracting code snippets, API references, and best practices. Ignore unrelated content like marketing pages, blogs, or user forums."
+# INSTRUCTIONS = "Documentation relevant to ai agents, langchain, and langgraph. Focus on extracting code snippets, API references, and best practices. Ignore unrelated content like marketing pages, blogs, or user forums."
+INSTRUCTIONS = "Documentation relevant to ai agents"
 
 
-async def async_crawl(url: str) -> list[Document]:
+async def crawl_async(url: str) -> list[Document]:
     log_info(
         f"🗺️  TavilyCrawl: Starting to crawl documentation from {url}", Colors.PURPLE
     )
 
     crawl_result = await tavily_crawl.ainvoke(
-        {
+        input={
             "url": url,
             "max_depth": 5,
             "extract_depth": "advanced",
@@ -52,7 +56,7 @@ async def async_crawl(url: str) -> list[Document]:
     return all_docs
 
 
-async def async_map(url: str):
+async def map_async(url: str):
     log_info(f"🗺️  TavilyMap: Starting to map documentation from {url}", Colors.PURPLE)
 
     map_result = await tavily_map.ainvoke(
@@ -73,11 +77,7 @@ async def async_map(url: str):
     return list(map_result["results"] or [])
 
 
-def chunk_urls(urls: list[str], chunk_size: int = 20) -> list[list[str]]:
-    return [urls[i : i + chunk_size] for i in range(0, len(urls), chunk_size)]
-
-
-async def extract_batch(urls: list[str], batch_num: int) -> List[Dict[str, Any]]:
+async def extract_batch_async(urls: list[str], batch_num: int) -> List[Dict[str, Any]]:
     try:
         log_info(
             f"TavilyExtract: Processing batch {batch_num} extraction for {len(urls)} URLs",
@@ -96,10 +96,11 @@ async def extract_batch(urls: list[str], batch_num: int) -> List[Dict[str, Any]]
         return []
 
 
-async def async_extract(url: str) -> list[Document]:
-    urls = await async_map(url)
+async def extract_async(url: str) -> list[Document]:
+    urls = await map_async(url)
 
-    url_batches = chunk_urls(urls, chunk_size=20)
+    chunk_size = 20
+    url_batches = [urls[i : i + chunk_size] for i in range(0, len(urls), chunk_size)]
     log_info(
         f"URL Processing: Split {len(urls)} URLs into {len(url_batches)} batches for extraction",
         Colors.BLUE,
@@ -115,7 +116,9 @@ async def async_extract(url: str) -> list[Document]:
         Colors.DARKCYAN,
     )
 
-    tasks = [extract_batch(batch, idx + 1) for idx, batch in enumerate(url_batches)]
+    tasks = [
+        extract_batch_async(batch, idx + 1) for idx, batch in enumerate(url_batches)
+    ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     all_pages = []
